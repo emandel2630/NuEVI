@@ -99,8 +99,12 @@
 #define EXTRA_SRC_ADDR 190
 #define STRIPCTL_ADDR 192
 #define STRIPCC_ADDR 194
+#define CHORDBASS_ADDR 196
+#define CHORDLIL_ADDR 198
+#define CHORDTEMP_ADDR 200
+#define CHORDTOP_ADDR 202
 
-#define EEPROM_SIZE 196 //Last address +2
+#define EEPROM_SIZE 204 //Last address +2
 
 
 //DAC output modes
@@ -117,7 +121,7 @@
 #define DIPSW_FPENABLE    7
 
 //"factory" values for settings
-#define EEPROM_VERSION 48
+#define EEPROM_VERSION 49
 
 #define BREATH_THR_FACTORY 1400
 #define BREATH_MAX_FACTORY 4000
@@ -207,6 +211,10 @@
 #define EXTRA_SRC_FACTORY 0
 #define STRIPCTL_FACTORY 1
 #define STRIPCC_FACTORY 1
+#define CHORDBASS_FACTORY 0  // with bass - rootless upper structures (spec section 4)
+#define CHORDLIL_FACTORY 12  // 12 is zero offset on the low interval limit table
+#define CHORDTEMP_FACTORY 20 // 2.0, the shipping temperature (spec section 8)
+#define CHORDTOP_FACTORY 0   // 0 is top voice ceiling at B4, the spec default
 
 #define NO_CHECKSUM 0x7F007F00
 

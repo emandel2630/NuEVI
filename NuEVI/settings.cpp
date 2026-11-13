@@ -191,6 +191,12 @@ void readEEPROM(const bool factoryReset) {
             writeSetting(STRIPCTL_ADDR, STRIPCTL_FACTORY);
             writeSetting(STRIPCC_ADDR, STRIPCC_FACTORY);
         }
+        if (settingsVersion < 49) {
+            writeSetting(CHORDBASS_ADDR, CHORDBASS_FACTORY);
+            writeSetting(CHORDLIL_ADDR, CHORDLIL_FACTORY);
+            writeSetting(CHORDTEMP_ADDR, CHORDTEMP_FACTORY);
+            writeSetting(CHORDTOP_ADDR, CHORDTOP_FACTORY);
+        }
 
         writeSetting(VERSION_ADDR, EEPROM_VERSION);
     }
@@ -258,7 +264,11 @@ void readEEPROM(const bool factoryReset) {
     batteryType = readSettingBounded(BATTYPE_ADDR, 0, 3, BATTYPE_FACTORY);
     harmSetting = readSettingBounded(HARMSET_ADDR, 0, 6, HARMSET_FACTORY);
     harmSelect = readSettingBounded(HARMSEL_ADDR, 0, 7, HARMSEL_FACTORY);
-    polySelect = (PolySelect)readSettingBounded(POLYSEL_ADDR, 0, 10, POLYSEL_FACTORY);
+    polySelect = (PolySelect)readSettingBounded(POLYSEL_ADDR, 0, 12, POLYSEL_FACTORY);
+    chordBass = readSettingBounded(CHORDBASS_ADDR, 0, 1, CHORDBASS_FACTORY);
+    chordLil = readSettingBounded(CHORDLIL_ADDR, 0, 18, CHORDLIL_FACTORY);
+    chordTemp = readSettingBounded(CHORDTEMP_ADDR, 0, 60, CHORDTEMP_FACTORY);
+    chordTop = readSettingBounded(CHORDTOP_ADDR, 0, 5, CHORDTOP_FACTORY);
     fwcType = readSettingBounded(FWCTYPE_ADDR, 0, 4, FWCTYPE_FACTORY);
     fwcLockH = readSettingBounded(FWCLCH_ADDR, 0, 1, FWCLCH_FACTORY);
     fwcDrop2 = readSettingBounded(FWCDP2_ADDR, 0, 1, FWCDP2_FACTORY);

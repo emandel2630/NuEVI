@@ -17,6 +17,11 @@ FWC – Four Way Close – old school block chord harmony (with additional optio
 RTA – Rotator A
 RTB – Rotator B
 RTC - Rotator C
+CHD - Chord Mode - the octave rollers select chord quality and the fingering
+      supplies the root, for comping rather than lead playing. See the separate
+      Chord Mode section for the full description.
+CHS - Simple Chord Mode - as CHD, but only the plain seventh chord tones
+      (R 3 5 7), each chord in the inversion closest to the last one.
 
 POLY PLAY – HMZ KEY
 

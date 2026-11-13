@@ -915,6 +915,12 @@ static void polySelectOptionGet(SubMenuRef __unused, char *out, const char **__u
     case 10:
         strncpy(out, "RTC", 4);
         break;
+    case 11:
+        strncpy(out, "CHD", 4);
+        break;
+    case 12:
+        strncpy(out, "CHS", 4);
+        break;
     }
 }
 
@@ -928,7 +934,7 @@ const MenuEntrySub polySelectMenu = {
     "SELECT",
     (uint16_t *)&polySelect,
     0,
-    10,
+    12,
     MenuEntryFlags::EMenuEntryWrap,
     polySelectOptionGet,
     polySelectSave,
@@ -953,6 +959,96 @@ const MenuEntrySub hmzLimitMenu = {
     MenuEntryFlags::EMenuEntryWrap,
     hmzLimitOptionGet,
     hmzLimitSave,
+    nullptr,
+};
+
+static void chordBassOptionGet(SubMenuRef __unused, char *out, const char **__unused unit) {
+    // WITH: a bassist is present, so the root is dropped and the voicings are
+    // rootless. SOLO: we cover root duty ourselves.
+    strncpy(out, chordBass ? "SOLO" : "WITH", 5);
+}
+
+static void chordBassSave(SubMenuRef __unused) {
+    writeSetting(CHORDBASS_ADDR, chordBass);
+}
+
+const MenuEntrySub chordBassMenu = {
+    MenuType::ESub,
+    "CHORD BASS",
+    "ROOT",
+    &chordBass,
+    0,
+    1,
+    MenuEntryFlags::EMenuEntryWrap,
+    chordBassOptionGet,
+    chordBassSave,
+    nullptr,
+};
+
+static void chordLilOptionGet(SubMenuRef sub, char *out, const char **__unused unit) {
+    // Shifts the whole low interval limit table. Tune once by ear against the
+    // patch: negative allows lower and muddier, positive is more conservative.
+    numToString((int16_t)(*sub.valuePtr) - 12, out, true);
+}
+
+static void chordLilSave(SubMenuRef __unused) {
+    writeSetting(CHORDLIL_ADDR, chordLil);
+}
+
+const MenuEntrySub chordLilMenu = {
+    MenuType::ESub,
+    "CHORD LIL",
+    "OFFSET",
+    &chordLil,
+    0,
+    18,
+    MenuEntryFlags::EMenuEntryWrap,
+    chordLilOptionGet,
+    chordLilSave,
+    nullptr,
+};
+
+static void chordTempOptionGet(SubMenuRef sub, char *out, const char **__unused unit) {
+    numToString((int16_t)(*sub.valuePtr), out, false);
+}
+
+static void chordTempSave(SubMenuRef __unused) {
+    writeSetting(CHORDTEMP_ADDR, chordTemp);
+}
+
+const MenuEntrySub chordTempMenu = {
+    MenuType::ESub,
+    "CHORD TEMP",
+    "x0.1",
+    &chordTemp,
+    0,
+    60,
+    MenuEntryFlags::EMenuEntryWrap,
+    chordTempOptionGet,
+    chordTempSave,
+    nullptr,
+};
+
+static void chordTopOptionGet(SubMenuRef sub, char *out, const char **__unused unit) {
+    // Semitones to drop the top voice band by. Raise this when the soloist is
+    // low rather than letting the comping voice above them.
+    numToString((int16_t)-(*sub.valuePtr), out, true);
+}
+
+static void chordTopSave(SubMenuRef __unused) {
+    writeSetting(CHORDTOP_ADDR, chordTop);
+}
+
+const MenuEntrySub chordTopMenu = {
+    MenuType::ESub,
+    "CHORD TOP",
+    "SHIFT",
+    &chordTop,
+    0,
+    5,
+    MenuEntryFlags::EMenuEntryWrap,
+    chordTopOptionGet,
+    chordTopSave,
     nullptr,
 };
 
@@ -1021,7 +1117,11 @@ const MenuEntry *rotatorMenuEntries[] = {
     (MenuEntry *)&rotatorPrioMenu,
     (MenuEntry *)&rotSubAMenu,
     (MenuEntry *)&rotSubBMenu,
-    (MenuEntry *)&rotSubCMenu};
+    (MenuEntry *)&rotSubCMenu,
+    (MenuEntry *)&chordBassMenu,
+    (MenuEntry *)&chordLilMenu,
+    (MenuEntry *)&chordTempMenu,
+    (MenuEntry *)&chordTopMenu};
 
 
 const MenuPage rotatorMenuPage = {

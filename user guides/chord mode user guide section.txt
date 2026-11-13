@@ -1,0 +1,171 @@
+CHORD MODE
+
+Chord Mode turns the instrument into a comping instrument. The octave rollers
+stop selecting octaves and instead select chord quality; your fingering supplies
+the chord root. Every note you blow produces a voiced jazz chord rather than a
+single pitch, voice led against the chord before it.
+
+Because the register comes from the voicing algorithm rather than from your
+fingering, only the pitch class of the fingered note matters. Fingering a C
+anywhere on the horn gives a chord rooted on C.
+
+This is a comping mode, not a lead mode. The voicings deliberately stay low and
+narrow so they sit under whoever is soloing.
+
+
+TURNING IT ON
+
+Select CHD in POLY PLAY - POLY MODE, then arm it the same way as the other poly
+modes: hold the Pinky Key (NuEVI) or MOD key (NuRAD) and touch the Special Key.
+Touch Pinky + Special Key again to turn it off.
+
+While Chord Mode is armed the octave rollers no longer change octave. Disarming
+it returns the rollers to normal octave duty immediately.
+
+
+SIMPLE CHORD MODE (CHS)
+
+Select CHS instead of CHD for plain chords. Arming, rollers and roller slots
+are exactly the same, but every chord is just the four chord tones - root, 3rd,
+5th, 7th - in close position (all within one octave). No extensions, no
+rootless voicings, no randomness.
+
+The first chord after power-on is in root position, root between C3 and B3.
+After that each chord takes whichever inversion of those four notes moves the
+voices the least from the chord before - a ii-V-I moves about three semitones
+in total per change. Every chord stays between Bb2 and C5, so the voicing can
+never wander off. CHORD BASS, CHORD LIL, CHORD TEMP and CHORD TOP have no
+effect in CHS.
+
+  dim7  R b3 b5 bb7     m7b5  R b3 b5 b7     min7  R b3 5 b7
+  dom7  R 3 5 b7        maj7  R 3 5 7        sus7  R 4 5 b7
+
+
+VOICE LEADING ACROSS BREATHS
+
+Both CHD and CHS lead each chord from the previous one even when you tongue
+or take a breath between them, not only when you change fingering while
+blowing. The instrument remembers the last chord it played until you power
+off. For the strictly smoothest choice every time in CHD, set CHORD TEMP to 0.
+
+
+TELLING THE SYNTH
+
+Arming and disarming Chord Mode (CHD or CHS) sends CC86 = 127 / CC86 = 0, and
+CC86 = 127 is repeated every 2 seconds while armed and not playing. Most synths
+ignore it (CC86 is undefined in the MIDI spec). The RaspiSynth uses it to
+switch the current patch to polyphonic and turn chords down to single-note
+level while Chord Mode is armed, and back to the patch's own mono settings when
+it is disarmed. For any other synth, use a polyphonic patch: a mono patch plays
+only one note of each chord.
+
+
+THE ROLLERS
+
+Each roller slot is one chord quality:
+
+  Roller 1  dim7
+  Roller 2  m7b5
+  Roller 3  min7
+  Roller 4  dom7
+  Roller 5  maj7
+  Roller 6  sus7
+
+The NuRAD has six roller pads, so slot 6 is a pad of its own. The NuEVI has
+five, and slot 6 is the R5 + R3 combination - touch both together.
+
+The order is chosen so that neighbouring slots are neighbours in real
+progressions, not in abstract theory. A major ii-V-I is simply rollers 3, 4, 5
+in sequence. The axis also runs dark to bright, so roller position has an
+intuitive meaning rather than being an arbitrary lookup.
+
+Rest your thumb on the min7/dom7 boundary - that is where most of the playing is.
+
+A minor ii-V is awkward: m7b5 (2) to dom7 (4) to min7 (3) is a two step jump and
+then a reversal. This is unavoidable, because minor ii-V wants m7b5 next to dom7
+while major ii-V wants min7 next to dom7, and min7 sits between them on any
+brightness axis. Major ii-V is far more common, so it wins.
+
+Lifting your thumb off the rollers entirely does not change the chord. The last
+quality you selected is held, in every roller mode.
+
+Changing quality while a note is still sounding does not retrigger the chord.
+Only the voices that actually move are re-struck; everything else keeps its
+envelope. Fingering a new root does retrigger the whole chord.
+
+
+POLY PLAY - CHORD BASS
+
+WITH - somebody else is playing bass. The root is dropped entirely and you play
+rootless four note upper structures in the Bill Evans tradition, kept above C3 so
+they stay out of the bass player's register. This is the default.
+
+SOLO - you cover root duty yourself. A root is added in the C2 to B2 window with
+the same upper structures above it, exactly the way a pianist plays it with the
+left hand. Three note reduced upper forms also become available in this mode, so
+the chord stays at four or five notes rather than growing to six.
+
+
+POLY PLAY - CHORD LIL
+
+Shifts the low interval limit table, which is what stops close intervals turning
+to mud in the low register. Range is -12 to +6 semitones, 0 is the standard
+orchestral table.
+
+Negative allows lower and closer voicings. Positive is more conservative. The
+right value depends on how much low harmonic content your synth patch carries,
+so tune this once by ear against the patch you actually play - a thin patch can
+take a negative value, a rich sawtooth pad usually wants 0 or above.
+
+At the extreme positive end a small number of chords fall back to a plain shell
+voicing (root and guide tones). That is by design and always sounds clean, just
+plainer.
+
+
+POLY PLAY - CHORD TEMP
+
+How much the voicing selection varies between repeats of the same chord. Stored
+in tenths, so 20 is 2.0, the default.
+
+In practice this dial does very little, because after filtering there are only
+ever two to eight usable voicings for any given chord. That is intentional: for
+a sustaining instrument, predictable is better than varied. Set it to 0 for
+completely deterministic voicing. If you want more variety, this is not the lever
+- the constraint system is already doing that job.
+
+
+POLY PLAY - CHORD TOP
+
+Drops the top voice band, in semitones, 0 to 5. 0 puts the top voice between Bb3
+and B4.
+
+The top voice is the one the audience hears as the tune, so it is deliberately
+kept low and stable. If the soloist is playing low - bass clarinet, baritone,
+guitar in low position - raise this to move the whole comp down out of their way
+rather than letting it float above them. At the maximum setting a few chords fall
+back to shell voicings, as above.
+
+
+NOTES
+
+Extensions are fixed per quality and there are no altered dominants. Whether a
+G7 wants a b9 or a natural 9 depends almost entirely on the chord that follows
+it, which the instrument cannot know at the moment you blow. A wrong guess there
+is a real clash against the soloist, not a mild blemish, so the line is drawn at
+alterations. Natural extensions do not have that problem - a 9 on a min7 is a 9
+regardless of what follows - so those are always present:
+
+  maj7   root 3 5 7 9
+  dom7   root 3 5 b7 9 13
+  min7   root b3 5 b7 9 11
+  m7b5   root b3 b5 b7 11
+  sus7   root 4 5 b7 9
+  dim7   root b3 b5 bb7
+
+Velocity is scaled down as the chord gets denser, so a five note voicing does not
+arrive five times louder than a single line. If your synth ignores velocity and
+runs its amplitude straight from breath, apply the same scaling on the synth side
+or chords will be much louder than single notes.
+
+Chord Mode has no separate voice limit setting. HMZ LIMIT applies to the key
+based harmonizers only, not here.

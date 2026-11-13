@@ -11,6 +11,7 @@
 #include "config.h"
 #include "settings.h"
 #include "led.h"
+#include "chordvoicer.h"
 
 /*
 NAME:                 NuEVI
@@ -103,6 +104,10 @@ unsigned short fwcLockH;           // OFF:ON
 unsigned short fwcDrop2;           // OFF:ON
 unsigned short hmzKey;             // 0-11 (0 is C)
 unsigned short hmzLimit;           // 2-5
+unsigned short chordBass;          // 0 - a bassist is present (rootless), 1 - we cover root duty
+unsigned short chordLil;           // low interval limit offset, stored 0-18 for -12..+6 semitones
+unsigned short chordTemp;          // softmax temperature x10
+unsigned short chordTop;           // top voice ceiling, semitones below B4 (0-5)
 unsigned short otfKey;             //OFF:ON
 unsigned short breathInterval = 6; // 3-15
 
@@ -525,6 +530,26 @@ int vibThrBiteLo;
 int fingeredNote;             // note calculated from fingering (switches), transpose and octave settings
 int fingeredNoteUntransposed; // note calculated from fingering (switches), for on the fly settings
 byte activeNote;              // note playing
+
+// Chord mode state (PolySelect::EChordMode). The voicing is *chosen* by the
+// voicer, not derived from the fingering, so unlike the harmonizer it cannot be
+// recomputed at release time - the player records what was sent and replays it.
+ChordPlayer chordPlayer;      // which voices are sounding, and on what chord
+bool chordNoteActive = false; // this note was STARTED in chord mode
+byte chordSlot = 4;           // deglitched roller slot; 4 is the dom7 resting position
+byte chordSlotRead = 0;       // raw roller slot, before deglitching
+int chordRootRead = 0;        // fingered note with the roller's contribution removed
+byte chordRootPc = 0;         // deglitched root pitch class, 0-11
+
+// Defined below, alongside the harmonizer emitters. Declared here because the
+// breath state machine calls them well before that point and these take types
+// the .ino auto-prototyper should not be trusted with.
+static inline bool chordModeOn();
+static ChordQuality chordQualityFromSlot(byte slot);
+static void chordStart(byte rootPc, byte slot, byte velocity);
+static void chordRevoice(byte rootPc, byte slot, byte velocity);
+static void chordStop();
+static void chordAnnounce(unsigned long now);
 byte startNote = 36;          // set startNote to C (change this value in steps of 12 to start in other octaves)
 int slurBase;                 // first note in slur sustain chord
 
@@ -863,6 +888,9 @@ void setup() {
     activeMIDIchannel = MIDIchannel;
     midiInitialize(MIDIchannel);
 
+    // Globals zero-initialise, but "nothing sounding" is CHORD_NONE, not 0.
+    chordPlayerInit(&chordPlayer);
+
     statusLedOn(); // Switch on the onboard LED to indicate power on/ready
 #if defined(PLATFORM_R1)
     cvTimer.begin(cvUpdate, 500); // Update breath CV output every 500 microseconds
@@ -1180,35 +1208,46 @@ void loop() {
                     velocitySend = velocity;
                 breath(); // send breath data
                 fingeredNote = noteValueCheck(fingeredNote);
-                if (priority) {                                 // mono prio to last chord note
-                    midiSendNoteOn(fingeredNote, velocitySend); // send Note On message for new note
-                }
-                if (parallelChord) {
-                    for (int i = 0; i < addedIntervals; i++) {
-                        midiSendNoteOn(noteValueCheck(fingeredNote + slurInterval[i]), velocitySend); // send Note On message for new note
+                // Latch the mode for the whole life of this note. polySelect
+                // is menu-writable at any time, including mid-note, so
+                // dispatching on the live value would let a note be started by
+                // one path and released by the other - stranding it.
+                chordNoteActive = chordModeOn();
+                if (chordNoteActive) {
+                    // Register comes from the voicer, so the fingered note is
+                    // never sounded - only its root pitch class is used.
+                    chordStart(chordRootPc, chordSlot, velocitySend);
+                } else {
+                    if (priority) {                                 // mono prio to last chord note
+                        midiSendNoteOn(fingeredNote, velocitySend); // send Note On message for new note
                     }
-                }
-                if (slurSustain) {
-                    midiSendControlChange(64, 127);
-                    slurBase = fingeredNote;
-                    addedIntervals = 0;
-                }
-                if (subOctaveDouble) {
-                    midiSendNoteOn(noteValueCheck(fingeredNote - 12), velocitySend);
                     if (parallelChord) {
                         for (int i = 0; i < addedIntervals; i++) {
-                            midiSendNoteOn(noteValueCheck(fingeredNote + slurInterval[i] - 12), velocitySend); // send Note On message for new note
+                            midiSendNoteOn(noteValueCheck(fingeredNote + slurInterval[i]), velocitySend); // send Note On message for new note
                         }
                     }
-                }
-                if (rotatorOn) {
-                    startHarmonizerNotes(fingeredNote);
-                }
-                if (!priority) {                                // mono prio to base note
-                    midiSendNoteOn(fingeredNote, velocitySend); // send Note On message for new note
-                }
-                if (slurSostenuto) {
-                    midiSendControlChange(66, 127);
+                    if (slurSustain) {
+                        midiSendControlChange(64, 127);
+                        slurBase = fingeredNote;
+                        addedIntervals = 0;
+                    }
+                    if (subOctaveDouble) {
+                        midiSendNoteOn(noteValueCheck(fingeredNote - 12), velocitySend);
+                        if (parallelChord) {
+                            for (int i = 0; i < addedIntervals; i++) {
+                                midiSendNoteOn(noteValueCheck(fingeredNote + slurInterval[i] - 12), velocitySend); // send Note On message for new note
+                            }
+                        }
+                    }
+                    if (rotatorOn) {
+                        startHarmonizerNotes(fingeredNote);
+                    }
+                    if (!priority) {                                // mono prio to base note
+                        midiSendNoteOn(fingeredNote, velocitySend); // send Note On message for new note
+                    }
+                    if (slurSostenuto) {
+                        midiSendControlChange(66, 127);
+                    }
                 }
                 activeNote = fingeredNote;
                 mainState = NOTE_ON;
@@ -1222,38 +1261,69 @@ void loop() {
         if ((pressureSensor < breathThrVal) && !gateOpen) {
             // Value has fallen below threshold - turn the note off
             activeNote = noteValueCheck(activeNote);
-            if (priority) {
-                midiSendNoteOff(activeNote); //  send Note Off message
-            }
-            if (parallelChord) {
-                for (int i = 0; i < addedIntervals; i++) {
-                    midiSendNoteOff(noteValueCheck(activeNote + slurInterval[i])); // send Note On message for new note
+            if (chordNoteActive) {
+                // Replay exactly what was sent. The voicing was chosen, not
+                // derived, so it cannot be recomputed from activeNote the way
+                // the harmonizer offsets are.
+                // No slur-pedal release here: chord mode never sends CC64/CC66
+                // on attack, and because the mode is latched per note, a note
+                // that did engage them is always released by the branch below.
+                chordStop();
+                chordNoteActive = false;
+            } else {
+                if (priority) {
+                    midiSendNoteOff(activeNote); //  send Note Off message
                 }
-            }
-            if (subOctaveDouble) {
-                midiSendNoteOff(noteValueCheck(activeNote - 12));
                 if (parallelChord) {
                     for (int i = 0; i < addedIntervals; i++) {
-                        midiSendNoteOff(noteValueCheck(activeNote + slurInterval[i] - 12)); // send Note On message for new note
+                        midiSendNoteOff(noteValueCheck(activeNote + slurInterval[i])); // send Note On message for new note
                     }
                 }
-            }
-            if (rotatorOn) {
-                stopHarmonizerNotes(activeNote);
-            }
-            if (!priority) {
-                midiSendNoteOff(activeNote); //  send Note Off message
-            }
-            if (slurSustain) {
-                midiSendControlChange(64, 0);
-            }
-            if (slurSostenuto) {
-                midiSendControlChange(66, 0);
+                if (subOctaveDouble) {
+                    midiSendNoteOff(noteValueCheck(activeNote - 12));
+                    if (parallelChord) {
+                        for (int i = 0; i < addedIntervals; i++) {
+                            midiSendNoteOff(noteValueCheck(activeNote + slurInterval[i] - 12)); // send Note On message for new note
+                        }
+                    }
+                }
+                if (rotatorOn) {
+                    stopHarmonizerNotes(activeNote);
+                }
+                if (!priority) {
+                    midiSendNoteOff(activeNote); //  send Note Off message
+                }
+                if (slurSustain) {
+                    midiSendControlChange(64, 0);
+                }
+                if (slurSostenuto) {
+                    midiSendControlChange(66, 0);
+                }
             }
             breathLevel = 0;
             mainState = NOTE_OFF;
         } else {
-            if (noteValueCheck(fingeredNote) != activeNote) {
+            if (chordNoteActive) {
+                // Chord mode keys on (root pitch class, roller slot) rather
+                // than on the note number. A roller move changes fingeredNote
+                // by a whole octave, which the legacy test below would read as
+                // a new note and retrigger; here it is a quality change and
+                // must revoice in place instead (spec section 9).
+                ChordQuality chordQuality = chordQualityFromSlot(chordSlot);
+                if (chordPlayerWouldChange(&chordPlayer, chordRootPc, chordQuality)) {
+                    if (!velocity) {
+                        unsigned int breathValHires = breathCurve(map(constrain(breathLevel, breathThrVal, breathMaxVal), breathThrVal, breathMaxVal, 0, 16383));
+                        velocitySend = (breathValHires >> 7) & 0x007F;
+                        velocitySend = constrain(velocitySend + velocitySend * .1 * velBias, 1, 127);
+                    }
+                    if (chordPlayer.activeRootPc != chordRootPc) {
+                        chordStart(chordRootPc, chordSlot, velocitySend); // new root, retrigger every voice
+                    } else {
+                        chordRevoice(chordRootPc, chordSlot, velocitySend); // roller only, no attack transient
+                    }
+                    activeNote = noteValueCheck(fingeredNote);
+                }
+            } else if (noteValueCheck(fingeredNote) != activeNote) {
                 // Player has moved to a new fingering while still blowing.
                 // Send a note off for the current note and a note on for
                 // the new note.
@@ -1350,6 +1420,7 @@ void loop() {
     }
 
     if (currentTime - ccSendTime3 > CC_INTERVAL3) {
+        chordAnnounce(currentTime);
         if (gateOpenEnable || gateOpen)
             doorKnobCheck();
         battCheck();
@@ -1414,6 +1485,7 @@ void loop() {
 
     //do menu stuff
     menu();
+
 }
 
 //_______________________________________________________________________________________________ FUNCTIONS
@@ -1467,6 +1539,107 @@ static void stopRotatorNotes(byte note, const Rotator *rotator) {
     if (rotator->rotations[currentRotation] - 24)
         midiSendNoteOff(noteValueCheck(note + rotator->rotations[currentRotation] - 24)); // send Note Off message for old note
 }
+
+//**************************************************************
+// Chord mode (PolySelect::EChordMode).
+//
+// The octave rollers select chord quality; the fingering supplies the root
+// pitch class. Register is discarded and supplied by the voicer, so the
+// fingered note itself is never sounded - with a bassist present the root is
+// dropped entirely. See chordvoicer.h and the "EWI Chord Mode" spec.
+
+static inline bool chordModeOn() {
+    // Selected in the menu, then armed live the same way every other poly mode
+    // is: Pinky Key + Special Key. That gives the player a way in and out of
+    // comping mid-tune without diving into the menu - which matters here more
+    // than for the harmonizers, because arming this also changes what the
+    // octave rollers mean.
+    return ((polySelect == PolySelect::EChordMode) || (polySelect == PolySelect::EChordSimple)) && rotatorOn;
+}
+
+// Tell the synth whether chord mode is armed: CC86 = 127 armed, 0 disarmed.
+// RaspiSynth's vitalsynth (chord_cc) uses it to switch the patch to poly and
+// compensate level; synths that don't know it ignore an undefined CC. Sent on
+// every change, and re-sent every 2 s while armed and idle so a synth that
+// restarted, or a dropped wireless packet, recovers without re-arming.
+#define CHORD_STATE_CC 86
+#define CHORD_STATE_REFRESH_MS 2000
+static void chordAnnounce(unsigned long now) {
+    static int8_t sent = -1; // -1: nothing sent yet, so boot reports the state once
+    static unsigned long lastSent = 0;
+    const bool on = chordModeOn();
+    if (sent < 0 || on != (sent == 1)) {
+        midiSendControlChange(CHORD_STATE_CC, on ? 127 : 0);
+        sent = on ? 1 : 0;
+        lastSent = now;
+    } else if (on && (mainState == NOTE_OFF) && (now - lastSent > CHORD_STATE_REFRESH_MS)) {
+        midiSendControlChange(CHORD_STATE_CC, 127);
+        lastSent = now;
+    }
+}
+
+static void chordBuildConfig(ChordVoicerConfig *cfg) {
+    chordVoicerDefaults(cfg);
+    cfg->simple = (polySelect == PolySelect::EChordSimple) ? 1 : 0;
+    cfg->bassMode = chordBass ? CHORD_BASS_SELF : CHORD_BASS_EXTERNAL;
+    cfg->lilOffset = (int8_t)((int)chordLil - 12);
+    cfg->tempTenths = (uint8_t)chordTemp;
+    // Drop the top-voice band when the soloist is playing low, rather than
+    // trying to voice above them (spec section 6). upperLo deliberately stays
+    // put: lowering it would push the upper structure into the bass window and
+    // the root would stop being the bottom of the chord.
+    cfg->topLo = (uint8_t)(58 - chordTop);
+    cfg->topHi = (uint8_t)(71 - chordTop);
+}
+
+static ChordQuality chordQualityFromSlot(byte slot) {
+    // octaveR is 0-7: slot 0 means no roller is touched and slot 7 is the bonus
+    // octave only rollerMode 3 can reach. Chord mode has six qualities, so
+    // clamp into 1-6.
+    if (slot < 1)
+        slot = 1;
+    if (slot > 6)
+        slot = 6;
+    return (ChordQuality)(slot - 1);
+}
+
+static void chordEmitOn(uint8_t note, uint8_t velocity, void *__unused user) {
+    midiSendNoteOn(note, velocity);
+}
+
+static void chordEmitOff(uint8_t note, void *__unused user) {
+    midiSendNoteOff(note);
+}
+
+static void chordStop() {
+    chordPlayerStop(&chordPlayer, chordEmitOff, nullptr);
+}
+
+// Drop the record of what is sounding without emitting note-offs. Called after
+// an all-notes-off, which silences the voices behind the player's back.
+void chordNotesReset() {
+    chordPlayerForget(&chordPlayer);
+    chordNoteActive = false;
+}
+
+// Fresh attack, or a new root while blowing: every voice retriggers.
+static void chordStart(byte rootPc, byte slot, byte velocity) {
+    ChordVoicerConfig cfg;
+    chordBuildConfig(&cfg);
+    chordPlayerStart(&chordPlayer, rootPc, chordQualityFromSlot(slot), velocity, &cfg,
+                     chordEmitOn, chordEmitOff, nullptr);
+}
+
+// Roller moved while the note is held: revoice in place, so held voices keep
+// their envelopes instead of taking a fresh attack (spec section 9).
+static void chordRevoice(byte rootPc, byte slot, byte velocity) {
+    ChordVoicerConfig cfg;
+    chordBuildConfig(&cfg);
+    chordPlayerRevoice(&chordPlayer, rootPc, chordQualityFromSlot(slot), velocity, &cfg,
+                       chordEmitOn, chordEmitOff, nullptr);
+}
+
+//**************************************************************
 
 static void stopHarmonizerNotes(byte note) {
     switch (polySelect) {
@@ -2427,6 +2600,7 @@ void readSwitches() {
                          // 3: Touched roller pair, release memory, bonus octave on top, 4 in menu
 #endif
         lastOctaveR = octaveR;
+        chordSlotRead = octaveR; // chord mode reads the roller as a quality slot, not an octave
 
         break;
     case 1:
@@ -2541,6 +2715,14 @@ void readSwitches() {
 
     int fingeredNoteRead = fingeredNoteUntransposed + (octave - 3) * 12 + transpose - 12 + qTransp + harmonicResult[harmSelect][harmonics] + brHarmonicResult[brHarmSelect][brHarmonics]; //lip sensor and breath harmonics
 
+    // Chord mode takes only the root pitch class from the fingering, and the
+    // roller must not affect it. EVI-style fingerings move the roller in whole
+    // octaves, so the pitch class is already roller-invariant; TPT and HRN map
+    // the roller through a harmonic series whose steps are NOT multiples of 12,
+    // which would otherwise let the roller change the root as well as the
+    // quality. Subtract whatever the roller actually contributed.
+    chordRootRead = fingeredNoteRead - ((4 == fingering) ? (6 - octaveR) * 12 : octaveR * 12);
+
     if (pinkyKey)
         pitchlatch = fingeredNoteUntransposed; //use pitchlatch to make settings based on note fingered
 
@@ -2639,8 +2821,14 @@ void readSwitches() {
     // 3: Touched roller pair, release memory, bonus octave on top, 4 in menu
 
     lastOctaveR = octaveR;
+    chordSlotRead = octaveR; // chord mode reads the roller as a quality slot, not an octave
 
     int qTransp = (pinkyKey && (pinkySetting < 25)) ? pinkySetting - 12 : 0;
+
+    // trumpetHarmonic and rollerHarmonic are [2][7], but octaveR reaches 7 in
+    // rollerMode 3. Clamp once here so the lookup stays in bounds and so chord
+    // mode can subtract exactly what was added.
+    byte chordRollerIdx = (octaveR > 6) ? 6 : octaveR;
 
     // Calculate midi note number from pressed keys
     if (0 == fingering) {                                               //EVI fingering
@@ -2658,13 +2846,13 @@ void readSwitches() {
         fingeredNoteUntransposed = startNote - 2 * K1 - K2 - 3 * K3     //"Trumpet valves"
                                    - 2                                  //Trumpet in B flat
                                    + 2 * K5 + K6 + trill3_interval * K7 //Trill keys. 3rd trill key interval controlled by setting
-                                   + 24 + trumpetHarmonic[K4][octaveR]; // roller harmonics
+                                   + 24 + trumpetHarmonic[K4][chordRollerIdx]; // roller harmonics
     } else if (3 == fingering) {                                        //HRN fingering
         fingeredNoteUntransposed = startNote - 2 * K1 - K2 - 3 * K3     //"Trumpet valves"
                                    + 5 * K4                             //Switch to Bb horn
                                    + 5                                  //Horn in F
                                    + 2 * K5 + K6 + trill3_interval * K7 //Trill keys. 3rd trill key interval controlled by setting
-                                   + 12 + rollerHarmonic[K4][octaveR];  // roller harmonics
+                                   + 12 + rollerHarmonic[K4][chordRollerIdx];  // roller harmonics
     }
 
     if (K3 && K7) {
@@ -2675,6 +2863,23 @@ void readSwitches() {
     }
 
     int fingeredNoteRead = fingeredNoteUntransposed + (octave - 3) * 12 + transpose - 12 + qTransp + harmonicResult[harmSelect][harmonics] + brHarmonicResult[brHarmSelect][brHarmonics]; //lip sensor harmonics
+
+    // Chord mode takes only the root pitch class from the fingering, and the
+    // roller must not affect it. EVI-style fingerings move the roller in whole
+    // octaves, so the pitch class is already roller-invariant; TPT and HRN map
+    // the roller through a harmonic series whose steps are NOT multiples of 12,
+    // which would otherwise let the roller change the root as well as the
+    // quality. Subtract whatever the roller actually contributed.
+    int chordRollerOffset;
+    if (2 == fingering)
+        chordRollerOffset = trumpetHarmonic[K4][chordRollerIdx];
+    else if (3 == fingering)
+        chordRollerOffset = rollerHarmonic[K4][chordRollerIdx];
+    else if (1 == fingering)
+        chordRollerOffset = (6 - octaveR) * 12;
+    else
+        chordRollerOffset = octaveR * 12;
+    chordRootRead = fingeredNoteRead - chordRollerOffset;
 
     pcCombo1 = (K1 && K5 && !K2 && !K3);
     pcCombo2 = (K2 && K6 && !K1 && !K3);
@@ -2692,6 +2897,16 @@ void readSwitches() {
         // whatever the reading is at, it's been there for longer
         // than the debounce delay, so take it as the actual current state
         fingeredNote = fingeredNoteRead;
+        // The roller pads have no hysteresis, so the chord slot needs the same
+        // debouncing the note number gets. A roller move shifts fingeredNoteRead
+        // by a whole octave, so the timer above already covers both.
+        // Slot 0 means no roller is touched. Spec section 9: a roller change
+        // during release is ignored, so hold the last real slot rather than
+        // collapsing the held chord to dim7 (which rollerMode 0, having no
+        // release memory of its own, would otherwise do on every lift).
+        if (chordSlotRead)
+            chordSlot = chordSlotRead;
+        chordRootPc = (byte)(((chordRootRead % 12) + 12) % 12);
     }
     lastFingering = fingeredNoteRead;
 }

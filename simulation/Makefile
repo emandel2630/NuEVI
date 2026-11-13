@@ -41,6 +41,7 @@ INCDIRS += $(addprefix -I,$(INCS))
 TARGET=nuevisim
 
 CXXFILES=		../NuEVI/menu.cpp \
+				../NuEVI/chordvoicer.cpp \
 				../NuEVI/adjustmenu.cpp \
 				../NuEVI/midi.cpp \
 				../NuEVI/settings.cpp \
