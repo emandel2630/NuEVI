@@ -47,6 +47,8 @@ enum PolySelect : unsigned short {
     ERotatorA = 8,
     ERotatorB = 9,
     ERotatorC = 10,
+    EChordMode = 11, // octave rollers select chord quality, fingering supplies the root
+    EChordSimple = 12, // as EChordMode, but always the plain root-position 7th chord (for testing)
 };
 
 struct Rotator 
@@ -129,6 +131,11 @@ extern unsigned short fwcLockH; // OFF:ON
 extern unsigned short fwcDrop2; // OFF:ON
 extern unsigned short hmzKey; // 0-11 (0 is C) 
 extern unsigned short hmzLimit; // 2-5
+void chordNotesReset(); // forget the sounding chord, e.g. after an all-notes-off
+extern unsigned short chordBass;  // 0 - a bassist is present (rootless), 1 - we cover root duty
+extern unsigned short chordLil;   // low interval limit offset, stored 0-18 for -12..+6 semitones
+extern unsigned short chordTemp;  // softmax temperature x10, 0 selects lowest cost deterministically
+extern unsigned short chordTop;   // top voice ceiling, stored as semitones below B4 (0-5)
 extern unsigned short otfKey; //OFF:ON
 extern unsigned short breathInterval; // 3-15
 extern unsigned short biteControl; // OFF, VIB, GLD, CC

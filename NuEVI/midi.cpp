@@ -66,6 +66,10 @@ void midiPanic() { // all notes off
         midiSendNoteOff(i);
         delay(2);
     }
+    // Chord mode tracks exactly which voices it is holding and only retriggers
+    // the ones that change. Everything is silent now, so drop that record or it
+    // would suppress the note-ons for voices this just killed.
+    chordNotesReset();
 }
 
 void midiInitialize(uint8_t channel) {

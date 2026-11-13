@@ -7,3 +7,5 @@ simulation/nuevisim
 .claude
 *.hex
 NuEVI/.gitignore
+tools/chordtest
+__pycache__/
